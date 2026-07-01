@@ -5,15 +5,18 @@ import { ApiResponse } from "../utils/ApiResponse.js";
 import { uploadOnCloudinary } from "../utils/cloudinary.js";
 
 
-console.log(process.env.CLOUDINARY_CLOUD_NAME);
-console.log(process.env.CLOUDINARY_API_KEY);
-console.log(process.env.CLOUDINARY_API_SECRET);
+// console.log(process.env.CLOUDINARY_CLOUD_NAME);
+// console.log(process.env.CLOUDINARY_API_KEY);
+// console.log(process.env.CLOUDINARY_API_SECRET);
 
-const generateAccessTokenAndRefreshtoken = async(userId) => {
+const generateAccessAndRefereshTokens = async(userId) => {
       
     try {
         
-        const user = await user.findById(userId);
+        const user = await User.findById(userId);
+
+        console.log(user);
+
         const accessToken = await user.generateAccessToken();
         const refreshToken = await user.generateRefreshToken();
         
@@ -23,6 +26,7 @@ const generateAccessTokenAndRefreshtoken = async(userId) => {
         return {accessToken, refreshToken};
 
     }catch (err){
+    //    console.log(err);
        throw new ApiError(500, "Something went wrong while generating access and refresh token")
     }
 }
@@ -40,7 +44,7 @@ const registerUser = asyncHandler( async (req, res) => {
 
 
     const {fullName, email, username, password} = req.body
-    console.log(req.body);
+    // console.log(req.body);
 
     if (
         [fullName, email, username, password].some((field) => field?.trim() === "")
@@ -104,33 +108,45 @@ const registerUser = asyncHandler( async (req, res) => {
 
 } )
 
-const loginUser = asyncHandler(async(req, res) =>{
+const loginUser = asyncHandler(async (req, res) =>{
+    // req body -> data
+    // username or email
+    //find the user
+    //password check
+    //access and referesh token
+    //send cookie
 
-     const [username, email, password] = req.body;
+    const {email, username, password} = req.body
+    console.log(email);
 
-     console.log(req.body);
+    if (!username && !email) {
+        throw new ApiError(400, "username or email is required")
+    }
+    
+    // Here is an alternative of above code based on logic discussed in video:
+    // if (!(username || email)) {
+    //     throw new ApiError(400, "username or email is required")
+        
+    // }
 
-     if(!username || !email) {
-         throw new ApiError(400, "User or email is required");
-     }
+    const user = await User.findOne({
+        $or: [{username}, {email}]
+    })
 
-     const user = await User.findOne({
-          $or: [{username}, {email}]
-     })
+    if (!user) {
+        throw new ApiError(404, "User does not exist")
+    }
 
-     if(!user){
-        throw new ApiError(401, "User dose not exsisted");
-     }
+   const isPasswordValid = await user.isPasswordCorrect(password)
 
-     const passwordcheck = await user.isPasswordCorrect(password);
+   if (!isPasswordValid) {
+    throw new ApiError(401, "Invalid user credentials")
+    }
 
-     if(!passwordcheck){
-        throw new ApiError(401, "Invalid password");
-     }
-     
-     const {accessToken, refreshToken} = await user.generateAccessTokenAndRefreshtoken();
+   const {accessToken, refreshToken} = await generateAccessAndRefereshTokens(user._id)
 
-     
+    const loggedInUser = await User.findById(user._id).select("-password -refreshToken")
+
     const options = {
         httpOnly: true,
         secure: true
@@ -149,13 +165,40 @@ const loginUser = asyncHandler(async(req, res) =>{
             "User logged In Successfully"
         )
     )
+
 })
 
 const logoutUser = asyncHandler(async(req, res) =>{
      
-    
+    const logoutUser = asyncHandler(async(req, res) => {
+    await User.findByIdAndUpdate(
+        req.user._id,
+        {
+            $unset: {
+                refreshToken: 1 // this removes the field from document we can write refreshtoken = ""
+            }
+        },
+        {
+            new: true
+        }
+    )
+
+    const options = {
+        httpOnly: true,
+        secure: true
+    }
+  // express me hmesa return res. hi krke krte h
+    return res
+        .status(200)
+        .clearCookie("accessToken", options)    // browser se token del
+        .clearCookie("refreshToken", options)   // same 
+        .json(new ApiResponse(200, {}, "User logged Out"))
+    })
+
 })
+
 export {
     registerUser,
-    loginUser
+    loginUser,
+    logoutUser
 }
